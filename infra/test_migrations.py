@@ -15,7 +15,12 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def main():
-    env = {**os.environ, "PGPASSWORD": secrets.token_hex(24)}
+    env = {
+        **os.environ,
+        "PGPASSWORD": secrets.token_hex(24),
+        # Required only while rendering Compose; the API service is removed below.
+        "BROSKI_DEV_TOKEN": secrets.token_hex(24),
+    }
     config = json.loads(subprocess.check_output(
         ["docker", "compose", "-f", str(ROOT / "compose.yaml"), "config", "--format", "json"],
         env=env, text=True,
@@ -59,6 +64,10 @@ def main():
                     "pgvector was not enabled")
             history = "SELECT count(*) FROM flyway_history.flyway_schema_history WHERE version='1' AND success"
             require(sql(history) == "1", "Expected one successful V1 migration")
+            require(sql("SELECT count(*) FROM information_schema.tables WHERE table_schema='public' AND table_name='documents'") == "1",
+                    "documents table was not created")
+            require(sql("SELECT count(*) FROM flyway_history.flyway_schema_history WHERE version='2' AND success") == "1",
+                    "Expected one successful V2 migration")
             print("Repeat migration: no duplicate version", flush=True)
             run("run", "--rm", "migrate", "migrate")
             require(sql(history) == "1", "Repeated migration duplicated V1")

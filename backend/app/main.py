@@ -6,7 +6,10 @@ import psycopg
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 
+from app.documents import router as documents_router
+
 app = FastAPI(title="Broski", version="0.1.0")
+app.include_router(documents_router)
 
 
 @app.get("/health/live")

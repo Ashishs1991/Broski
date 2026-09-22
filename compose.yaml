@@ -41,8 +41,14 @@ services:
       PGDATABASE: broski
       PGUSER: broski
       PGPASSWORD: ${PGPASSWORD:?Set PGPASSWORD in .env}
+      BROSKI_DEV_TOKEN: ${BROSKI_DEV_TOKEN:?Set BROSKI_DEV_TOKEN in .env}
+      BROSKI_DEV_OWNER_ID: ${BROSKI_DEV_OWNER_ID:-local-owner}
+      BROSKI_STORAGE_ROOT: /data
+      BROSKI_MAX_UPLOAD_BYTES: ${BROSKI_MAX_UPLOAD_BYTES:-52428800}
     ports:
       - "127.0.0.1:8000:8000"
+    volumes:
+      - ./data:/data
     depends_on:
       migrate:
         condition: service_completed_successfully

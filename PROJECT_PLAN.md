@@ -21,7 +21,7 @@ The initial deployment serves one owner. Every document still has trusted owners
 
 | Layer | Choice | Why / implementation boundary |
 |---|---|---|
-| Web interface | React + TypeScript + Vite | Uploads, processing states, document library, chat, citations, and private download actions; responsive browser app |
+| User channel | No custom web UI initially; Telegram is the provisional first adapter | Core API stays channel-independent; highly sensitive files use authenticated downloads unless the user explicitly accepts channel-provider handling |
 | API | Python 3.11 + FastAPI | Document endpoints, retrieval, model orchestration; one application rather than microservices |
 | Database | PostgreSQL 17 + pgvector | Documents, ownership, chunks, vectors, and durable ingestion jobs in one database |
 | DB access | Psycopg + Flyway versioned SQL migrations | Direct transactions and explicit schema without a generic persistence framework |
@@ -34,7 +34,7 @@ The initial deployment serves one owner. Every document still has trusted owners
 | Packaging | Docker Compose for local API/database/worker; static frontend plus API/worker and persistent services for deployment | Hosting target is still to be selected; current Compose is local-development only |
 | Verification | pytest/API checks plus a small document-and-question evaluation set | Prove access, lifecycle, retrieval, and answer behavior, not only happy-path responses |
 
-The frontend needs a compatible Node runtime (planned Node 22.12+); this host currently has Node 18. No global runtime was changed during T01. Docling/OCR packages and models will be installed in the worker phase, not in the lightweight API foundation.
+Docling/OCR packages and models will be installed in the worker phase, not in the lightweight API foundation. No Node runtime is currently required.
 
 Hosted identity/object-storage service creation is not part of T01. If all processing/storage must remain private, settle the corresponding deployment and model choices before integration; the current foundation contains no cloud calls.
 
@@ -98,11 +98,11 @@ Deliver: minimal FastAPI application; `/health/live`; database/pgvector `/health
 
 Acceptance: API tests pass; liveness is independent of database health; readiness fails without usable configuration/pgvector; responses do not leak database error details. Live Compose/DB verification requires a running Docker daemon.
 
-Status: API implementation and tests prepared. Docker runtime integration remains unverified because the local daemon is unavailable. This task does not implement uploads or claim a deployable app.
+Status: complete. API tests and live disposable PostgreSQL/Flyway integration have passed. This foundation still does not claim a deployable app.
 
-### T02 — Authenticated document vault and initial interface
+### T02 — Owner-scoped document vault API
 
-Deliver: login/session boundary, trusted owner, document registry/schema, private originals, validated upload, list/detail/download/delete, user-editable title/type (book, note, policy, deed, identity, other), React library view, and visible status. Use synthetic examples until sensitive-data controls are verified.
+Deliver: development authentication boundary, trusted owner, document registry/schema, private originals, validated upload, list/detail/download/delete, user-editable title/type (book, note, policy, deed, identity, other), and visible API status. Use synthetic examples until sensitive-data controls are verified. Production identity and the bot adapter remain later tasks.
 
 Acceptance: upload a synthetic Aadhaar/PDF, find it in the library, and download the same original bytes. Another identity cannot list, retrieve, or download it. Validate actual file content rather than trusting extension/MIME alone. Apply request/body limits, protect paths, and keep credentials and files out of Git.
 
@@ -122,9 +122,9 @@ Deliver: owner-scoped chunks and vectors, embedding version tracking, compatible
 
 Acceptance: known questions retrieve the expected evidence; retrieval never returns another user's content; updated/deleted documents are no longer eligible; records survive restart. Publish baseline results on the evaluation set before adding a reranker.
 
-### T05 — Chat: return files and answer policy questions
+### T05 — Telegram chat: return files and answer policy questions
 
-Deliver: document-fetch versus question routing, metadata-assisted matching, source selection, grounded answer generation, cited pages/sections, ambiguity handling, insufficient-evidence response, and a minimal chat UI with download cards.
+Deliver: verified Telegram adapter, mapping from Telegram identity to Broski owner, document-fetch versus question routing, metadata-assisted matching, source selection, grounded answer generation, cited pages/sections, ambiguity handling, and insufficient-evidence response. Sensitive attachments require an explicit data-handling choice; authenticated Broski download links are the safer default.
 
 Acceptance: “send me my Aadhaar” returns the selected original, not a generated substitute. Ask about insurance coverage/limits and verify the answer against policy clauses and tables. Missing exclusions/schedules or unreadable values lead to qualified answers or requests for evidence. No fabricated citations.
 
@@ -169,7 +169,10 @@ No external services, provider accounts, or public deployment were created by T0
 - 21 September: repository cloned and broad phase plan drafted.
 - 22 September: user defined the deployable MVP. OCR, private file return, and personal-policy Q&A moved inside release scope; durable jobs moved ahead of model answering.
 - T01: runnable API foundation and local database configuration added; tests and live-integration status are recorded in README.
-- Next implementation task: **T02, the authenticated document vault**, followed by OCR ingestion. Resolve the two open processing/import questions before their dependent integrations.
+- 22 September: custom frontend deferred; Telegram selected provisionally as the first chat adapter, after the channel-independent document/OCR core.
+- T02 in progress: Flyway document schema and owner-scoped vault API added with local-only development authentication and content validation.
+- T02 live checks: synthetic PDF upload/list, byte-identical download, soft delete, post-delete denial, invalid-token rejection, and cross-owner filtering passed against PostgreSQL.
+- Next implementation task: complete T02 with live PostgreSQL integration and production identity decision, then build OCR ingestion. Resolve the processing/import questions before their dependent integrations.
 
 ## 10. Primary documentation checked for the stack
 
