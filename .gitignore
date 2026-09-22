@@ -16,3 +16,4 @@ artifacts/
 *.log
 *.pem
 *.key
+docs/ARCHITECTURE_DECISIONS.md

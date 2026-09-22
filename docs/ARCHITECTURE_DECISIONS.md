@@ -18,7 +18,7 @@ Trade-offs we accept with pgvector: vector workloads share PostgreSQL resources;
 
 ## Python rather than Java for the first service
 
-Java is the developer's strongest language. Python is chosen intentionally for this learning project because Docling, OCR/ML libraries, embedding SDKs, and RAG experimentation are Python-first, and FastAPI makes a small typed API straightforward. Python is not inherently more scalable than Java, and Java/Spring would be a strong choice for a team standardized on the JVM.
+ Python is chosen intentionally for this learning project because Docling, OCR/ML libraries, embedding SDKs, and RAG experimentation are Python-first, and FastAPI makes a small typed API straightforward. Python is not inherently more scalable than Java, and Java/Spring would be a strong choice for a team standardized on the JVM.
 
 **Interview answer:**
 
