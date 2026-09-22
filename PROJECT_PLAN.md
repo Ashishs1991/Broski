@@ -24,7 +24,7 @@ The initial deployment serves one owner. Every document still has trusted owners
 | Web interface | React + TypeScript + Vite | Uploads, processing states, document library, chat, citations, and private download actions; responsive browser app |
 | API | Python 3.11 + FastAPI | Document endpoints, retrieval, model orchestration; one application rather than microservices |
 | Database | PostgreSQL 17 + pgvector | Documents, ownership, chunks, vectors, and durable ingestion jobs in one database |
-| DB access | Psycopg; SQL migrations as tables are added | Direct transactions and explicit schema without a generic persistence framework |
+| DB access | Psycopg + Flyway versioned SQL migrations | Direct transactions and explicit schema without a generic persistence framework |
 | Parsing/OCR | Docling with a local OCR engine | Process supported PDFs, scans, images, and DOCX with source structure; benchmark the configured engine on the corpus |
 | Lexical retrieval | PostgreSQL full-text search as first baseline | Complement vectors for terms/identifiers; measure tokenization before claiming exact-ID behavior |
 | Jobs | Separate Python worker claiming durable PostgreSQL jobs | OCR/books must not run in the upload request; bounded retries and recoverable leases; no Redis/Kafka dependency initially |
@@ -180,3 +180,19 @@ No external services, provider accounts, or public deployment were created by T0
 - [Supabase private storage behavior](https://supabase.com/docs/guides/storage/buckets/fundamentals), if selected for hosted storage
 
 These sources establish component capabilities, not measured Broski compatibility; the configured parser and infrastructure still need fixture/integration checks.
+
+## Database choice and migration decision — 22 September 2026
+
+Use PostgreSQL with pgvector for the initial Broski workload. PostgreSQL is the application database; pgvector adds vector types and similarity search inside that database. Original PDFs/images remain in private file/object storage.
+
+This keeps ownership, document versions, chunks, ingestion jobs, and eventually embeddings together, with SQL constraints and transactions for related database changes. It reduces operational services and the need to reconcile two independent databases after updates/deletes. It does not make database and object-storage writes one atomic transaction; that boundary still requires recoverable cleanup.
+
+MongoDB plus Milvus is a valid alternative: MongoDB can hold application documents and Milvus can serve vector retrieval. The trade-off is coordinating identifiers, access metadata, ingestion status, and deletion across the two stores. MongoDB also offers its own vector-search capability, so MongoDB does not inherently require Milvus. Milvus supports scalar filtering and configurable consistency; this choice is not based on a claim that those features are missing.
+
+Reconsider a dedicated vector engine if measurements show vector search requires independent scaling, specialized indexing, or throughput/latency that our PostgreSQL deployment cannot meet economically. Benchmark actual chunk count, dimensions, filter selectivity, recall, concurrent writes, and P95 before changing the design. Our interview-scale examples are not the first personal-assistant deployment workload.
+
+PostgreSQL full-text search is the initial lexical baseline, not built-in BM25. pgvector supports exact and approximate search, but ANN plus selective filters needs recall measurement/tuning; one database does not remove that obligation.
+
+Flyway now owns schema evolution. The initial version enables pgvector, and document tables will arrive in a later version with T02. Startup waits for migration success. Image/version, schema history, upgrade commands, and existing-volume handling are documented in README.
+
+References: [pgvector](https://github.com/pgvector/pgvector), [MongoDB Vector Search](https://www.mongodb.com/docs/vector-search/), [Milvus filtering](https://milvus.io/docs/filtered-search.md), [Flyway Docker](https://documentation.red-gate.com/fd/flyway-docker-321585710.html).

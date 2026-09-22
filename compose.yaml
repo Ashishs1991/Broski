@@ -10,12 +10,29 @@ services:
       - "127.0.0.1:5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./infra/001_extensions.sql:/docker-entrypoint-initdb.d/001_extensions.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U broski -d broski"]
       interval: 5s
       timeout: 3s
       retries: 12
+  migrate:
+    image: flyway/flyway:13.6.0
+    command: migrate
+    environment:
+      FLYWAY_URL: jdbc:postgresql://db:5432/broski
+      FLYWAY_USER: broski
+      FLYWAY_PASSWORD: ${PGPASSWORD:?Set PGPASSWORD in .env}
+      FLYWAY_LOCATIONS: filesystem:/flyway/sql
+      FLYWAY_DEFAULT_SCHEMA: flyway_history
+      FLYWAY_SCHEMAS: flyway_history
+      FLYWAY_CLEAN_DISABLED: "true"
+      FLYWAY_BASELINE_ON_MIGRATE: "false"
+      FLYWAY_VALIDATE_MIGRATION_NAMING: "true"
+    volumes:
+      - ./infra/migrations:/flyway/sql:ro
+    depends_on:
+      db:
+        condition: service_healthy
   api:
     build: ./backend
     environment:
@@ -27,7 +44,7 @@ services:
     ports:
       - "127.0.0.1:8000:8000"
     depends_on:
-      db:
-        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
 volumes:
   postgres_data:
