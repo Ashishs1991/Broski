@@ -1,0 +1,18 @@
+.env
+.env.*
+!.env.example
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+node_modules/
+dist/
+.DS_Store
+# Originals, extracted content, vectors, logs, and local credentials stay out of Git.
+data/
+uploads/
+artifacts/
+*.log
+*.pem
+*.key

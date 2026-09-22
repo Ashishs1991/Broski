@@ -1,0 +1,33 @@
+# Local development only; never publish these services directly to the internet.
+services:
+  db:
+    image: pgvector/pgvector:pg17
+    environment:
+      POSTGRES_DB: broski
+      POSTGRES_USER: broski
+      POSTGRES_PASSWORD: ${PGPASSWORD:?Set PGPASSWORD in .env}
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./infra/001_extensions.sql:/docker-entrypoint-initdb.d/001_extensions.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U broski -d broski"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+  api:
+    build: ./backend
+    environment:
+      PGHOST: db
+      PGPORT: "5432"
+      PGDATABASE: broski
+      PGUSER: broski
+      PGPASSWORD: ${PGPASSWORD:?Set PGPASSWORD in .env}
+    ports:
+      - "127.0.0.1:8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+volumes:
+  postgres_data:
