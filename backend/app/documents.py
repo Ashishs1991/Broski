@@ -52,6 +52,16 @@ class ProcessingStatus(BaseModel):
     review_extracted_text: bool
 
 
+class EvidenceChunk(BaseModel):
+    ordinal: int
+    text: str
+    page_number: int | None
+    section_path: str | None
+    source_sha256: str
+    parser_version: str
+    embedding_model: str | None
+
+
 def connection():
     return psycopg.connect(connect_timeout=3, options="-c statement_timeout=5000", row_factory=dict_row)
 
@@ -222,6 +232,31 @@ def get_processing_status(document_id: UUID, owner: Annotated[str, Depends(curre
         **row,
         review_extracted_text=document["media_type"] in {"application/pdf", "image/png", "image/jpeg"},
     )
+
+
+@router.get("/{document_id}/evidence", response_model=list[EvidenceChunk])
+def document_evidence(
+    document_id: UUID,
+    owner: Annotated[str, Depends(current_owner)],
+    limit: int = 100,
+    offset: int = 0,
+):
+    if not 1 <= limit <= 100 or offset < 0:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Invalid evidence page")
+    owned_document(document_id, owner)
+    with connection() as database:
+        rows = database.execute(
+            """
+            SELECT c.ordinal, c.text, c.page_number, c.section_path, c.source_sha256,
+                   c.parser_version, c.embedding_model
+            FROM public.document_chunks c
+            JOIN public.documents d ON d.id = c.document_id
+            WHERE d.id = %s AND d.owner_id = %s AND d.deleted_at IS NULL AND d.status = 'ready'
+            ORDER BY c.ordinal LIMIT %s OFFSET %s
+            """,
+            (document_id, owner, limit, offset),
+        ).fetchall()
+    return [EvidenceChunk(**row) for row in rows]
 
 
 @router.get("/{document_id}/download")

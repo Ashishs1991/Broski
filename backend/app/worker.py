@@ -10,12 +10,35 @@ import time
 from uuid import uuid4
 
 from app.documents import STORAGE_ROOT, connection
+from app.embedding import embed_passages, model_version
 
-PARSER_VERSION = "pymupdf-1.28.2-docx-1.2-tesseract-eng-v1"
+PARSER_VERSION = "pymupdf-1.28.2-docx-1.2-tesseract-eng-v2"
 MAX_ATTEMPTS = 3
 PROCESS_TIMEOUT = 300
 LEASE_SECONDS = 600
 MAX_PAGES = int(os.getenv("BROSKI_MAX_PAGES", "300"))
+
+
+def queue_stale_embeddings():
+    with connection() as database:
+        database.execute("""
+            WITH stale AS (
+                UPDATE public.documents d SET status = 'queued', updated_at = now()
+                WHERE d.status = 'ready' AND d.deleted_at IS NULL
+                  AND EXISTS (
+                    SELECT 1 FROM public.document_chunks c
+                    WHERE c.document_id = d.id
+                      AND (c.embedding_model IS DISTINCT FROM %s
+                           OR c.parser_version IS DISTINCT FROM %s)
+                  )
+                RETURNING d.id
+            )
+            INSERT INTO public.ingestion_jobs (document_id, status)
+            SELECT id, 'queued' FROM stale
+            ON CONFLICT (document_id) DO UPDATE
+            SET status = 'queued', attempts = 0, available_at = now(),
+                lease_until = NULL, lease_token = NULL, error = NULL, updated_at = now()
+        """, (model_version(), PARSER_VERSION))
 
 
 def claim():
@@ -59,7 +82,7 @@ def claim():
     return (row["document_id"], token) if row else None
 
 
-def finish(document_id, token, chunks=None, error=None):
+def finish(document_id, token, chunks=None, vectors=None, error=None):
     with connection() as database:
         document = database.execute("""
             SELECT storage_key, sha256 FROM public.documents
@@ -89,13 +112,15 @@ def finish(document_id, token, chunks=None, error=None):
             )
             return
         database.execute("DELETE FROM public.document_chunks WHERE document_id = %s", (document_id,))
-        for ordinal, chunk in enumerate(chunks):
+        for ordinal, (chunk, vector) in enumerate(zip(chunks, vectors, strict=True)):
             database.execute("""
                 INSERT INTO public.document_chunks
-                    (document_id, ordinal, text, page_number, section_path, source_sha256, parser_version)
-                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                    (document_id, ordinal, text, page_number, section_path,
+                     source_sha256, parser_version, embedding, embedding_model)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s::vector, %s)
             """, (document_id, ordinal, chunk["text"], chunk["page_number"],
-                  chunk["section_path"], document["sha256"], PARSER_VERSION))
+                  chunk["section_path"], document["sha256"], PARSER_VERSION,
+                  vector, model_version()))
         database.execute(
             "UPDATE public.documents SET status = 'ready', updated_at = now() WHERE id = %s",
             (document_id,),
@@ -114,7 +139,7 @@ def process_one():
     document_id, token = claimed
     with connection() as database:
         document = database.execute(
-            "SELECT storage_key, sha256 FROM public.documents WHERE id = %s",
+            "SELECT storage_key, sha256, title FROM public.documents WHERE id = %s",
             (document_id,),
         ).fetchone()
     source = STORAGE_ROOT / "originals" / document["storage_key"]
@@ -129,8 +154,9 @@ def process_one():
                 check=True, capture_output=True, timeout=PROCESS_TIMEOUT,
             )
             chunks = json.loads(output.read_text(encoding="utf-8"))
-        finish(document_id, token, chunks=chunks)
-    except (OSError, ValueError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
+        vectors = embed_passages(chunks, document["title"])
+        finish(document_id, token, chunks=chunks, vectors=vectors)
+    except (OSError, RuntimeError, ValueError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
         # Do not expose raw parser stderr or source content through the API.
         error = str(exc) if isinstance(exc, ValueError) else "Document processing failed"
         finish(document_id, token, error=error[:200])
@@ -138,6 +164,7 @@ def process_one():
 
 
 if __name__ == "__main__":
+    queue_stale_embeddings()
     while True:
         if not process_one():
             time.sleep(2)

@@ -5,7 +5,9 @@ import re
 import subprocess
 import sys
 
-MAX_CHARS = 3000
+# ponytail: character cap approximates the model's 512-token window; use token-aware
+# splitting if real documents show tail truncation.
+MAX_CHARS = 1800
 MAX_EXTRACTED_CHARS = 2_000_000
 
 

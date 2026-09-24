@@ -3,3 +3,4 @@ uvicorn==0.53.0
 python-dotenv==1.2.3
 psycopg[binary]==3.3.6
 python-multipart==0.0.22
+fastembed==0.8.1

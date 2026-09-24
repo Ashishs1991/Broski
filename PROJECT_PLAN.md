@@ -1,6 +1,6 @@
 # Broski — MVP and Implementation Plan
 
-Version: 0.3 · Updated: 25 September 2026
+Version: 0.4 · Updated: 25 September 2026
 Repository: `git@github.com:Ashishs1991/Broski.git`  
 Local checkout: `/Users/ashish/Code/Broski`
 
@@ -26,11 +26,12 @@ The initial deployment serves one owner. Every document still has trusted owners
 | Database | PostgreSQL 17 + pgvector | Documents, ownership, chunks, vectors, and durable ingestion jobs in one database |
 | DB access | Psycopg + Flyway versioned SQL migrations | Direct transactions and explicit schema without a generic persistence framework |
 | Parsing/OCR | PyMuPDF + python-docx + local Tesseract | Preserve PDF pages, Word headings/tables, and scan text with a small CPU-only worker; benchmark accuracy on personal-document samples before release |
-| Lexical retrieval | PostgreSQL full-text search as first baseline | Complement vectors for terms/identifiers; measure tokenization before claiming exact-ID behavior |
+| Lexical retrieval | PostgreSQL full-text search plus literal identifier matching | Complement vectors for terms and exact error codes; this is not BM25 |
 | Jobs | Separate Python worker claiming durable PostgreSQL jobs | OCR/books must not run in the upload request; bounded retries and recoverable leases; no Redis/Kafka dependency initially |
 | Original storage | Protected local volume in development; private object storage for deployment | Keep originals independent of extracted text; authorize file delivery; no public bucket |
 | Login | Managed OIDC login, with Supabase Auth as the proposed hosted option | Verify issuer/audience/signature and derive owner server-side; final hosting choice follows privacy/deployment preference |
-| Embeddings / answer model | Provider choice pending processing preference | No private content goes to an external provider until permitted; select models against quality, language, and budget tests |
+| Embeddings | Local FastEmbed BAAI/bge-small-en-v1.5 (384 dimensions) | CPU ONNX model prefetched into API/worker images; same model bytes and version on both sides; no document text leaves Broski |
+| Answer model | Provider choice pending processing preference | No private content goes to an external provider until permitted; choose against quality, language, privacy, and budget tests |
 | Packaging | Docker Compose for local API/database/worker; static frontend plus API/worker and persistent services for deployment | Hosting target is still to be selected; current Compose is local-development only |
 | Verification | pytest/API checks plus a small document-and-question evaluation set | Prove access, lifecycle, retrieval, and answer behavior, not only happy-path responses |
 
@@ -118,13 +119,15 @@ Acceptance: process fixtures for digital PDF, scanned PDF, DOCX, notes, a table,
 
 States: `uploaded → queued → processing → ready`, or `failed`; `deleted` blocks every read path. Classification uncertainty can request confirmation rather than silently label a deed as an insurance policy.
 
-Status: implementation complete in the local stack. Synthetic fixture checks passed for digital PDF, scanned PDF, image, DOCX heading/table, notes, and corrupt PDF; live upload-to-chunks, stale-lease recovery, and deletion checks passed in a disposable database. T03 remains open until OCR accuracy is checked on representative labeled policy/identity scans and the worker's resource limits are exercised on a book-sized sample.
+Status: implementation complete in the local stack. Synthetic fixture checks passed for digital PDF, scanned PDF, image, DOCX heading/table, notes, corrupt PDF, and a 300-page book with page-limit rejection; live upload-to-chunks, stale-lease recovery, and deletion checks passed in a disposable database. T03 remains open until OCR accuracy is checked on representative labeled policy/identity scans.
 
 ### T04 — Vector retrieval and evidence inspection
 
 Deliver: owner-scoped chunks and vectors, embedding version tracking, compatible query embeddings, lexical baseline, evidence inspection, and ingestion-to-index readiness publication. Model provider integration depends on the processing choice.
 
 Acceptance: known questions retrieve the expected evidence; retrieval never returns another user's content; updated/deleted documents are no longer eligible; records survive restart. Publish baseline results on the evaluation set before adding a reranker.
+
+Status: implemented and verified in the local stack. V4 adds 384-dimensional vectors and a PostgreSQL full-text index. The worker marks a document ready only after its chunks and vectors commit together; model/parser-version changes requeue stale documents. `/search` fuses exact cosine and full-text candidates, promotes literal identifiers, and applies owner plus optional document filters. `/documents/{id}/evidence` exposes page/section and provenance for inspection. A disposable live stack passed cross-owner filtering, restart/reindex, and deletion removal. On ten labeled synthetic questions, top-1 was vector 9/10, lexical 7/10, hybrid 10/10. This tiny English fixture is a baseline, not production quality evidence; reranking and HNSW wait for measured need.
 
 ### T05 — Telegram chat: return files and answer policy questions
 
@@ -177,7 +180,8 @@ No external services, provider accounts, or public deployment were created by T0
 - T02 complete: Flyway document schema and owner-scoped vault API added with local-only development authentication and content validation.
 - T02 live checks: synthetic PDF upload/list, byte-identical download, soft delete, post-delete denial, invalid-token rejection, and cross-owner filtering passed against PostgreSQL.
 - 25 September: T03 worker, V3 jobs/chunks, scan OCR, status, checksum/version provenance, bounded retries, and deletion cleanup implemented. Synthetic format and live restart checks passed; representative OCR accuracy and book-size limits are the remaining T03 gates.
-- Next implementation task: finish those ingestion gates, then build owner-scoped lexical/vector evidence retrieval in T04. Production identity and deployment selection remain later release decisions.
+- 25 September: T04 local embeddings, vector/full-text search, exact-code promotion, owner filters, evidence inspection, and model-version reindexing implemented. Ten synthetic retrieval questions establish the initial top-1 baseline.
+- Next implementation task: finish T03's representative OCR check, then T05 Telegram document lookup and evidence-grounded policy answers. Production identity and deployment selection remain T06 decisions.
 
 ## 10. Primary documentation checked for the stack
 

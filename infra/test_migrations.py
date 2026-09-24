@@ -70,6 +70,8 @@ def main():
                     "Expected one successful V2 migration")
             require(sql("SELECT count(*) FROM flyway_history.flyway_schema_history WHERE version='3' AND success") == "1",
                     "Expected one successful V3 migration")
+            require(sql("SELECT count(*) FROM flyway_history.flyway_schema_history WHERE version='4' AND success") == "1",
+                    "Expected one successful V4 migration")
             print("Repeat migration: no duplicate version", flush=True)
             run("run", "--rm", "migrate", "migrate")
             require(sql(history) == "1", "Repeated migration duplicated V1")
@@ -91,12 +93,30 @@ def main():
                         'note.md', 'text/markdown', 'note.md', 1, repeat('a', 64))
             """, "broski_backfill")
             run("run", "--rm", "-e", "FLYWAY_URL=jdbc:postgresql://db:5432/broski_backfill",
-                "migrate", "migrate")
+                "-e", "FLYWAY_TARGET=3", "migrate", "migrate")
             require(sql("""
                 SELECT d.status || ':' || j.status FROM public.documents d
                 JOIN public.ingestion_jobs j ON j.document_id=d.id
                 WHERE d.id='11111111-1111-1111-1111-111111111111'
             """, "broski_backfill") == "queued:queued", "V3 did not queue an existing upload")
+            print("V3 ready documents: requeue for V4 embeddings", flush=True)
+            sql("""
+                UPDATE public.documents SET status='ready'
+                WHERE id='11111111-1111-1111-1111-111111111111';
+                UPDATE public.ingestion_jobs SET status='complete'
+                WHERE document_id='11111111-1111-1111-1111-111111111111';
+                INSERT INTO public.document_chunks
+                    (document_id, ordinal, text, source_sha256, parser_version)
+                VALUES ('11111111-1111-1111-1111-111111111111', 0,
+                        'Policy limit 500000', repeat('a', 64), 'old-parser')
+            """, "broski_backfill")
+            run("run", "--rm", "-e", "FLYWAY_URL=jdbc:postgresql://db:5432/broski_backfill",
+                "migrate", "migrate")
+            require(sql("""
+                SELECT d.status || ':' || j.status FROM public.documents d
+                JOIN public.ingestion_jobs j ON j.document_id=d.id
+                WHERE d.id='11111111-1111-1111-1111-111111111111'
+            """, "broski_backfill") == "queued:queued", "V4 did not requeue a ready document")
             print("Invalid checksum: validation must fail", flush=True)
             sql("UPDATE flyway_history.flyway_schema_history SET checksum=checksum+1 WHERE version='1'")
             run("run", "--rm", "migrate", "validate", succeeds=False)

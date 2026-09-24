@@ -1,4 +1,4 @@
-"""Local development foundation. Document and authentication routes follow in T02."""
+"""Broski's local API."""
 
 import os
 
@@ -7,9 +7,11 @@ from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 
 from app.documents import router as documents_router
+from app.search import router as search_router
 
 app = FastAPI(title="Broski", version="0.1.0")
 app.include_router(documents_router)
+app.include_router(search_router)
 
 
 @app.get("/health/live")

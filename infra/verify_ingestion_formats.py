@@ -52,4 +52,19 @@ with TemporaryDirectory() as directory:
     else:
         raise AssertionError("Corrupt PDF was accepted")
 
-print("PASS: digital PDF, scanned PDF, image, DOCX heading/table, note, corrupt PDF")
+    book = pymupdf.open()
+    for number in range(300):
+        book_page = book.new_page()
+        book_page.insert_text((72, 72), f"Chapter {number + 1}. A long book page with a clear source number.")
+    book.save(root / "book.pdf")
+    chunks = extract(root / "book.pdf", 300)
+    assert chunks[0]["page_number"] == 1
+    assert chunks[-1]["page_number"] == 300
+    try:
+        extract(root / "book.pdf", 299)
+    except ValueError as error:
+        assert "page limit" in str(error)
+    else:
+        raise AssertionError("Over-limit book was accepted")
+
+print("PASS: digital PDF, scanned PDF, image, DOCX heading/table, note, corrupt PDF, 300-page book")
