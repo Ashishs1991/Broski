@@ -52,5 +52,28 @@ services:
     depends_on:
       migrate:
         condition: service_completed_successfully
+  worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.worker
+    restart: unless-stopped
+    read_only: true
+    mem_limit: 1g
+    cpus: "2.0"
+    tmpfs:
+      - /tmp:size=268435456
+    environment:
+      PGHOST: db
+      PGPORT: "5432"
+      PGDATABASE: broski
+      PGUSER: broski
+      PGPASSWORD: ${PGPASSWORD:?Set PGPASSWORD in .env}
+      BROSKI_STORAGE_ROOT: /data
+      BROSKI_MAX_PAGES: ${BROSKI_MAX_PAGES:-300}
+    volumes:
+      - ./data:/data:ro
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
 volumes:
   postgres_data:

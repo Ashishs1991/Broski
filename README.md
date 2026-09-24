@@ -4,7 +4,7 @@ A personal document assistant: retrieve original files and answer from your book
 
 ## Current state
 
-**Task T02 in progress: document vault API.** Implemented: the T01 API/database foundation plus Flyway's document registry schema and owner-scoped upload, list, detail, private download, and soft-delete endpoints. OCR, retrieval, chat, production login, and the Telegram adapter are **not implemented yet**. The bearer token is for loopback development only.
+**T01–T02 complete; T03 ingestion implemented and under fixture validation.** Upload, list, detail, private download, and delete are owner-scoped. Uploads now queue a separate worker that extracts text and records page/section-linked chunks. Retrieval, chat, production login, and Telegram are still pending. The bearer token is for loopback development only.
 
 Read [PROJECT_PLAN.md](PROJECT_PLAN.md) for the updated MVP scope, stack, task order, and acceptance criteria.
 
@@ -33,9 +33,9 @@ Ports bind to loopback. The database is persisted in a Docker volume. Flyway app
 
 ## Database migrations with Flyway
 
-SQL migrations live in `infra/migrations/`. `V1__enable_pgvector.sql` enables the vector extension in `public`; `V2__create_documents.sql` creates the owner-scoped document registry. Chunk tables and embedding dimensions are intentionally deferred until ingestion/retrieval is implemented.
+SQL migrations live in `infra/migrations/`. V1 enables pgvector, V2 creates the document registry, and V3 adds durable ingestion jobs and document chunks. Embedding dimensions remain deferred until retrieval is implemented.
 
-Startup order is `db healthy → migrate succeeds → api starts`. A failed migration prevents a new API container from starting. For an already-running application, apply migrations explicitly as part of each release; Compose does not pause or restart a running API just because a migration file changed.
+Startup order is `db healthy → migrate succeeds → api and worker start`. A failed migration prevents new API or worker containers from starting. For an already-running application, apply migrations explicitly as part of each release; Compose does not pause or restart a running API just because a migration file changed.
 
 ```sh
 # Normal local startup, including migration
@@ -98,13 +98,27 @@ curl -OJ -H "Authorization: Bearer $BROSKI_DEV_TOKEN" \
   http://127.0.0.1:8000/documents/DOCUMENT_ID/download
 ```
 
-Accepted file contents currently match PDF, DOCX, PNG, JPEG, Markdown, or UTF-8 plain text. Extensions and client MIME types are not trusted. Files are stored under generated IDs in the gitignored `data/` directory with mode `0600`. The default limit is 50 MiB.
+Accepted file contents match PDF, DOCX, PNG, JPEG, Markdown, or UTF-8 plain text. Extensions and client MIME types are not trusted. Files are stored under generated IDs in the gitignored `data/` directory with mode `0600`. The upload limit is 50 MiB.
 
-Deletion immediately hides the row from all vault endpoints and moves the original into `data/.deleted`. Automated retention/purging is deferred until the ingestion lifecycle task. Do not expose this development token or API to the internet; production OIDC or a verified bot identity must replace it.
+Uploads return `queued`; poll `GET /documents/DOCUMENT_ID/status` for `processing`, `ready`, or `failed`, including attempt count and a safe failure summary. The worker limits PDFs to 300 pages, extracted text to 2 million characters, and one processing attempt to five minutes. It retries transient failures up to three times; interrupted jobs become available again after a ten-minute lease. Originals are checked against their SHA-256 before processing. Reprocessing replaces chunks transactionally, so a restarted worker does not duplicate active chunks.
+
+`review_extracted_text` is true for PDFs and images because OCR/layout extraction can misread important numbers. Check insurance values against the original before relying on them. The worker uses PyMuPDF for digital PDFs, python-docx for Word, and local English Tesseract for scans. This initial worker processes one job at a time.
+
+Deletion immediately hides the row from all vault endpoints, cancels its job, removes extracted chunks, and moves the original into `data/.deleted`. Automated retention/purging remains a later release task. Do not expose this development token or API to the internet; production OIDC or a verified bot identity must replace it.
 
 ## Verification
 
-API tests pass in Python 3.11. Live disposable-container verification also passes: Flyway applies V1/V2 to a fresh database, repeated migration is idempotent, the previous extension-only database is adopted, and an altered checksum is rejected. The API integration check covered invalid authentication, synthetic PDF upload/list, byte-identical private download, soft deletion, post-delete denial, and another owner's record being excluded from list/detail responses.
+API tests pass in Python 3.11. Live disposable-container verification also passes: Flyway applies V1–V3 to a fresh database, repeated migration is idempotent, the previous extension-only database is adopted, and an altered checksum is rejected. The API integration check covered invalid authentication, synthetic PDF upload/list, byte-identical private download, soft deletion, post-delete denial, and another owner's record being excluded from list/detail responses.
+
+For T03, the disposable migration check also verifies V3 and backfills uploads created under V2. The isolated worker format check is:
+
+```sh
+docker build -f backend/Dockerfile.worker -t broski-worker-check backend
+docker run --rm --network none -e PYTHONPATH=/app -v "$PWD/infra:/checks:ro" \
+  broski-worker-check python /checks/verify_ingestion_formats.py
+```
+
+It checks synthetic digital/scanned PDFs, an image, DOCX headings/tables, a note, and a corrupt PDF. A local integration run also checked queued → ready, one chunk after an expired lease was reclaimed, and zero chunks after deletion. Representative insurance scans and a book-size stress case still need evaluation before release.
 
 The current host has Node 18. Frontend setup will use Node 22.12+ (or a supported later version), matching Vite's runtime requirements; no global Node installation was changed in T01.
 

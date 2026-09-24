@@ -68,6 +68,8 @@ def main():
                     "documents table was not created")
             require(sql("SELECT count(*) FROM flyway_history.flyway_schema_history WHERE version='2' AND success") == "1",
                     "Expected one successful V2 migration")
+            require(sql("SELECT count(*) FROM flyway_history.flyway_schema_history WHERE version='3' AND success") == "1",
+                    "Expected one successful V3 migration")
             print("Repeat migration: no duplicate version", flush=True)
             run("run", "--rm", "migrate", "migrate")
             require(sql(history) == "1", "Repeated migration duplicated V1")
@@ -77,6 +79,24 @@ def main():
             run("run", "--rm", "-e", "FLYWAY_URL=jdbc:postgresql://db:5432/broski_legacy",
                 "migrate", "migrate")
             require(sql(history, "broski_legacy") == "1", "Legacy database did not apply V1")
+            print("V2 documents: queue existing uploads during V3", flush=True)
+            sql("CREATE DATABASE broski_backfill")
+            run("run", "--rm", "-e", "FLYWAY_URL=jdbc:postgresql://db:5432/broski_backfill",
+                "-e", "FLYWAY_TARGET=2", "migrate", "migrate")
+            sql("""
+                INSERT INTO public.documents
+                    (id, owner_id, title, document_type, original_filename, media_type,
+                     storage_key, size_bytes, sha256)
+                VALUES ('11111111-1111-1111-1111-111111111111', 'owner', 'note', 'note',
+                        'note.md', 'text/markdown', 'note.md', 1, repeat('a', 64))
+            """, "broski_backfill")
+            run("run", "--rm", "-e", "FLYWAY_URL=jdbc:postgresql://db:5432/broski_backfill",
+                "migrate", "migrate")
+            require(sql("""
+                SELECT d.status || ':' || j.status FROM public.documents d
+                JOIN public.ingestion_jobs j ON j.document_id=d.id
+                WHERE d.id='11111111-1111-1111-1111-111111111111'
+            """, "broski_backfill") == "queued:queued", "V3 did not queue an existing upload")
             print("Invalid checksum: validation must fail", flush=True)
             sql("UPDATE flyway_history.flyway_schema_history SET checksum=checksum+1 WHERE version='1'")
             run("run", "--rm", "migrate", "validate", succeeds=False)

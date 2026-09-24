@@ -45,6 +45,13 @@ class Document(BaseModel):
     updated_at: str
 
 
+class ProcessingStatus(BaseModel):
+    status: str
+    attempts: int
+    error: str | None
+    review_extracted_text: bool
+
+
 def connection():
     return psycopg.connect(connect_timeout=3, options="-c statement_timeout=5000", row_factory=dict_row)
 
@@ -140,14 +147,18 @@ def upload_document(
                     """
                     INSERT INTO public.documents
                         (id, owner_id, title, document_type, original_filename, media_type,
-                         storage_key, size_bytes, sha256)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                         storage_key, size_bytes, sha256, status)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, 'queued')
                     RETURNING id, title, document_type, original_filename, media_type,
                               size_bytes, sha256, status, created_at, updated_at
                     """,
                     (document_id, owner, display_title, document_type.value, filename, media_type,
                      storage_key, size, digest.hexdigest()),
                 ).fetchone()
+                database.execute(
+                    "INSERT INTO public.ingestion_jobs (document_id, status) VALUES (%s, 'queued')",
+                    (document_id,),
+                )
         except psycopg.Error:
             destination.unlink(missing_ok=True)
             raise
@@ -197,6 +208,22 @@ def get_document(document_id: UUID, owner: Annotated[str, Depends(current_owner)
     return serialize(row)
 
 
+@router.get("/{document_id}/status", response_model=ProcessingStatus)
+def get_processing_status(document_id: UUID, owner: Annotated[str, Depends(current_owner)]):
+    document = owned_document(document_id, owner)
+    with connection() as database:
+        row = database.execute(
+            """SELECT d.status, j.attempts, j.error
+               FROM public.ingestion_jobs j JOIN public.documents d ON d.id = j.document_id
+               WHERE j.document_id = %s""",
+            (document_id,),
+        ).fetchone()
+    return ProcessingStatus(
+        **row,
+        review_extracted_text=document["media_type"] in {"application/pdf", "image/png", "image/jpeg"},
+    )
+
+
 @router.get("/{document_id}/download")
 def download_document(document_id: UUID, owner: Annotated[str, Depends(current_owner)]):
     row = owned_document(document_id, owner)
@@ -218,6 +245,12 @@ def delete_document(document_id: UUID, owner: Annotated[str, Depends(current_own
             """,
             (document_id, owner),
         ).fetchone()
+        if row:
+            database.execute(
+                "UPDATE public.ingestion_jobs SET status = 'cancelled', lease_token = NULL, updated_at = now() WHERE document_id = %s",
+                (document_id,),
+            )
+            database.execute("DELETE FROM public.document_chunks WHERE document_id = %s", (document_id,))
     if not row:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Document not found")
     source = STORAGE_ROOT / "originals" / row["storage_key"]

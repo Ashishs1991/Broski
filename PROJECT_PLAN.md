@@ -1,6 +1,6 @@
 # Broski — MVP and Implementation Plan
 
-Version: 0.2 · Updated: 22 September 2026  
+Version: 0.3 · Updated: 25 September 2026
 Repository: `git@github.com:Ashishs1991/Broski.git`  
 Local checkout: `/Users/ashish/Code/Broski`
 
@@ -25,7 +25,7 @@ The initial deployment serves one owner. Every document still has trusted owners
 | API | Python 3.11 + FastAPI | Document endpoints, retrieval, model orchestration; one application rather than microservices |
 | Database | PostgreSQL 17 + pgvector | Documents, ownership, chunks, vectors, and durable ingestion jobs in one database |
 | DB access | Psycopg + Flyway versioned SQL migrations | Direct transactions and explicit schema without a generic persistence framework |
-| Parsing/OCR | Docling with a local OCR engine | Process supported PDFs, scans, images, and DOCX with source structure; benchmark the configured engine on the corpus |
+| Parsing/OCR | PyMuPDF + python-docx + local Tesseract | Preserve PDF pages, Word headings/tables, and scan text with a small CPU-only worker; benchmark accuracy on personal-document samples before release |
 | Lexical retrieval | PostgreSQL full-text search as first baseline | Complement vectors for terms/identifiers; measure tokenization before claiming exact-ID behavior |
 | Jobs | Separate Python worker claiming durable PostgreSQL jobs | OCR/books must not run in the upload request; bounded retries and recoverable leases; no Redis/Kafka dependency initially |
 | Original storage | Protected local volume in development; private object storage for deployment | Keep originals independent of extracted text; authorize file delivery; no public bucket |
@@ -34,7 +34,7 @@ The initial deployment serves one owner. Every document still has trusted owners
 | Packaging | Docker Compose for local API/database/worker; static frontend plus API/worker and persistent services for deployment | Hosting target is still to be selected; current Compose is local-development only |
 | Verification | pytest/API checks plus a small document-and-question evaluation set | Prove access, lifecycle, retrieval, and answer behavior, not only happy-path responses |
 
-Docling/OCR packages and models will be installed in the worker phase, not in the lightweight API foundation. No Node runtime is currently required.
+The parser packages live in the worker image, not the lightweight API. Docling was evaluated, but its current dependency resolution pulled a large GPU stack on the local ARM Docker build. We chose the smaller CPU-only tools for the first release; revisit Docling if table/layout accuracy on actual documents proves insufficient. No Node runtime is currently required.
 
 Hosted identity/object-storage service creation is not part of T01. If all processing/storage must remain private, settle the corresponding deployment and model choices before integration; the current foundation contains no cloud calls.
 
@@ -92,7 +92,7 @@ Polling is not necessary for user uploads. Add it for an external source that ne
 
 ## 6. Tasks in build order
 
-### T01 — API/database foundation (current task)
+### T01 — API/database foundation (complete)
 
 Deliver: minimal FastAPI application; `/health/live`; database/pgvector `/health/ready`; local Docker Compose; dependency pins; tests; environment template; data/secret exclusions; this revised plan and run instructions.
 
@@ -108,13 +108,17 @@ Acceptance: upload a synthetic Aadhaar/PDF, find it in the library, and download
 
 Deletion first makes the record inaccessible, then cleans derived artifacts through recoverable work. Define cleanup/retry behavior so a failed storage delete never leaves an accessible orphan.
 
+Status: complete for the local development vault. Production identity and storage lifecycle remain T06 work.
+
 ### T03 — Background ingestion, multi-format parsing, and OCR
 
-Deliver: durable jobs with attempts/leases, one worker, processing states, Docling/OCR configuration, size/page/time limits, structured chunks, original provenance, checksum/version tracking, safe retry and restart. Parse untrusted files in a constrained worker with no unnecessary credentials/network access.
+Deliver: durable jobs with attempts/leases, one worker, processing states, local parsing/OCR configuration, size/page/time limits, structured chunks, original provenance, checksum/version tracking, safe retry and restart. Parse untrusted files in a constrained worker with no unnecessary credentials/network access.
 
 Acceptance: process fixtures for digital PDF, scanned PDF, DOCX, notes, a table, and an image. Preserve cited pages/sections. A corrupted/unreadable file becomes a visible failure, not ready. Kill/restart a worker and verify recovery without duplicate active chunks. OCR uncertainties are surfaced and checked on a labeled sample.
 
 States: `uploaded → queued → processing → ready`, or `failed`; `deleted` blocks every read path. Classification uncertainty can request confirmation rather than silently label a deed as an insurance policy.
+
+Status: implementation complete in the local stack. Synthetic fixture checks passed for digital PDF, scanned PDF, image, DOCX heading/table, notes, and corrupt PDF; live upload-to-chunks, stale-lease recovery, and deletion checks passed in a disposable database. T03 remains open until OCR accuracy is checked on representative labeled policy/identity scans and the worker's resource limits are exercised on a book-sized sample.
 
 ### T04 — Vector retrieval and evidence inspection
 
@@ -170,14 +174,15 @@ No external services, provider accounts, or public deployment were created by T0
 - 22 September: user defined the deployable MVP. OCR, private file return, and personal-policy Q&A moved inside release scope; durable jobs moved ahead of model answering.
 - T01: runnable API foundation and local database configuration added; tests and live-integration status are recorded in README.
 - 22 September: custom frontend deferred; Telegram selected provisionally as the first chat adapter, after the channel-independent document/OCR core.
-- T02 in progress: Flyway document schema and owner-scoped vault API added with local-only development authentication and content validation.
+- T02 complete: Flyway document schema and owner-scoped vault API added with local-only development authentication and content validation.
 - T02 live checks: synthetic PDF upload/list, byte-identical download, soft delete, post-delete denial, invalid-token rejection, and cross-owner filtering passed against PostgreSQL.
-- Next implementation task: complete T02 with live PostgreSQL integration and production identity decision, then build OCR ingestion. Resolve the processing/import questions before their dependent integrations.
+- 25 September: T03 worker, V3 jobs/chunks, scan OCR, status, checksum/version provenance, bounded retries, and deletion cleanup implemented. Synthetic format and live restart checks passed; representative OCR accuracy and book-size limits are the remaining T03 gates.
+- Next implementation task: finish those ingestion gates, then build owner-scoped lexical/vector evidence retrieval in T04. Production identity and deployment selection remain later release decisions.
 
 ## 10. Primary documentation checked for the stack
 
 - [FastAPI file uploads](https://fastapi.tiangolo.com/tutorial/request-files/)
-- [Docling supported formats](https://docling-project.github.io/docling/usage/supported_formats/) and [OCR overview](https://docling-project.github.io/docling/)
+- [PyMuPDF extraction and tables](https://pymupdf.readthedocs.io/en/latest/the-basics.html), [python-docx document order](https://python-docx.readthedocs.io/en/stable/api/document.html), and [Tesseract](https://tesseract-ocr.github.io/)
 - [pgvector](https://github.com/pgvector/pgvector)
 - [Vite runtime requirements](https://vite.dev/guide/)
 - [Supabase private storage behavior](https://supabase.com/docs/guides/storage/buckets/fundamentals), if selected for hosted storage
